@@ -22,9 +22,11 @@ on run
 	end if
 
 	-- Prefer Homebrew's Python; /usr/bin/python3 works too once the Command Line Tools are installed.
+	-- Only the server goes in the background, with every stream detached: backgrounding a whole
+	-- "cd && nohup ..." list leaves a subshell holding do shell script's pipe, and the app hangs.
 	do shell script "if [ -x /opt/homebrew/bin/python3 ]; then P=/opt/homebrew/bin/python3; else P=/usr/bin/python3; fi; " & ¬
-		"cd " & quoted form of repoDir & " && nohup \"$P\" -m http.server " & serverPort & ¬
-		" --bind 0.0.0.0 > /dev/null 2>&1 &"
+		"cd " & quoted form of repoDir & " || exit 1; " & ¬
+		"nohup \"$P\" -m http.server " & serverPort & " --bind 0.0.0.0 < /dev/null > /dev/null 2>&1 &"
 	delay 1
 	if listeningPids() is "" then
 		display dialog "The server didn't start. Is Python 3 installed, and is port " & serverPort & " free?" & return & return & ¬

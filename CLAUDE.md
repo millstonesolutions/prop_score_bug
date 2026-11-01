@@ -22,6 +22,10 @@ Live NFL score bug for ProPresenter, built 2026-11-01. Owner: Heath (church AV/I
 - **OBS only renders a browser source while it's visible** (Program, Preview or a projector). Off-screen,
   `GetSourceScreenshot` and the NDI output are fully transparent even though the page loaded (the server log showed
   the fonts being fetched). A windowed projector of the Score Bug scene keeps it alive.
+- **The launcher beachballed** on its first build: `do shell script "cd X && nohup server ... &"` backgrounds the
+  whole `&&` list as a subshell that keeps do shell script's stdout pipe open, so the applet waits forever (the
+  server *did* start). Keep `cd X || exit 1;` separate and background only the server with `< /dev/null > /dev/null
+  2>&1 &`.
 - At 960 px wide the status column ("Kickoff 12:00 PM") was clipped; the source is 1120 × 140.
 - Resizing the source left a stale band from the old texture until the source was refreshed.
 - OBS 32.2.2 crashed at launch on macOS 27.2 (in `QWidget::setCursor` → `QImage::toCGImage`), safe mode included.
