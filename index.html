@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Score Bug</title>
+<!--
+  Millstone Solutions Prop Score Bug - live NFL score bug for an OBS Browser Source -> NDI ->
+  ProPresenter prop. (c) 2026 Millstone Solutions LLC, Church and Ministry Use License (see LICENSE).
+
+  OBS: Browser Source, Local file = this file, width 1120, height 140.
+  OBS only renders a browser source while it is visible somewhere (program,
+  preview, or a projector), so the NDI output is blank unless one is open.
+  The page background is transparent; the bug itself is a solid box, so it
+  looks right even if the NDI alpha channel is ignored (crop the prop to it).
+
+  URL options (append to the file URL, e.g. index.html?team=DAL&preview=1):
+    team=DAL       team abbreviation to follow (default DAL)
+    preview=1      dark backdrop so you can see it in a normal browser
+    demo=live|pre|half|final|bye   fake data for layout testing, no network
+
+  Data: ESPN's public (undocumented) scoreboard JSON. Polls every 10 s while
+  the game is on, every 60 s otherwise.
+-->
+<style>
+  @font-face { font-family: "Lato"; font-weight: 900; src: url("fonts/Lato-Black.ttf"); }
+  @font-face { font-family: "Lato"; font-weight: 700; src: url("fonts/Lato-Bold.ttf"); }
+  @font-face { font-family: "Lato"; font-weight: 400; src: url("fonts/Lato-Regular.ttf"); }
+
+  :root {
+    --black: #000000; --white: #FFFFFF; --cyan: #02CAF2; --blue: #097DDB;
+    --g1: #F7F7F7; --g2: #D0D4D7; --g3: #979797; --g4: #595959;
+  }
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body.preview { background: #2a2d31; padding: 40px; }
+
+  .bug {
+    display: inline-flex; align-items: stretch;
+    height: 110px; margin: 15px;
+    background: var(--black); color: var(--white);
+    border-radius: 14px; overflow: hidden;
+    font-family: "Lato", sans-serif;
+    box-shadow: 0 0 0 2px #1b1d20;
+    transition: opacity .4s;
+  }
+  .bug.stale { opacity: .55; }
+  .accent { width: 10px; background: var(--cyan); }
+
+  .team {
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 22px 0 18px; min-width: 250px;
+    border-right: 1px solid #222;
+  }
+  .team img { width: 64px; height: 64px; object-fit: contain; }
+  .team .abbr { font-weight: 700; font-size: 34px; letter-spacing: .04em; }
+  .team .rec { font-weight: 400; font-size: 18px; color: var(--g3); margin-top: -2px; }
+  .team .score {
+    margin-left: auto; font-weight: 900; font-size: 60px;
+    font-variant-numeric: tabular-nums; min-width: 1.3em; text-align: right;
+  }
+  .team .pos {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--cyan); visibility: hidden;
+  }
+  .team.has-ball .pos { visibility: visible; }
+  .team.loser .score, .team.loser .abbr { color: var(--g3); }
+
+  .status {
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 28px; min-width: 210px;
+  }
+  .status .main { font-weight: 900; font-size: 38px; white-space: nowrap; }
+  .status .main .clock { color: var(--cyan); font-variant-numeric: tabular-nums; }
+  .status .sub { font-weight: 400; font-size: 20px; color: var(--g2); white-space: nowrap; margin-top: 2px; }
+  .status .sub.redzone { color: var(--cyan); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="bug" id="bug" hidden>
+  <div class="accent"></div>
+  <div class="team" id="away">
+    <img alt=""><div><div class="abbr"></div><div class="rec"></div></div>
+    <div class="pos"></div><div class="score"></div>
+  </div>
+  <div class="team" id="home">
+    <img alt=""><div><div class="abbr"></div><div class="rec"></div></div>
+    <div class="pos"></div><div class="score"></div>
+  </div>
+  <div class="status"><div class="main" id="main"></div><div class="sub" id="sub"></div></div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TEAM = (params.get("team") || "DAL").toUpperCase();
+const DEMO = params.get("demo");
+if (params.get("preview")) document.body.classList.add("preview");
+
+const API = "https://site.api.espn.com/apis/site/v2/sports/football/nfl";
+const STALE_MS = 2 * 60 * 1000;
+let lastGood = 0;
+
+const ordinal = n => n > 4 ? (n === 5 ? "OT" : (n - 4) + "OT") : ["1st", "2nd", "3rd", "4th"][n - 1];
+const logoFor = abbr => `https://a.espncdn.com/i/teamlogos/nfl/500-dark/${abbr.toLowerCase()}.png`;
+
+function kickoffText(iso) {
+  const d = new Date(iso), now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return "Kickoff " + time;
+  return d.toLocaleDateString([], { weekday: "short" }) + " " + time;
+}
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(r.status + " " + url);
+  return r.json();
+}
+
+// Returns an ESPN event for TEAM: today's scoreboard first, else the team's next game.
+async function findEvent() {
+  const sb = await getJSON(API + "/scoreboard");
+  const ev = sb.events.find(e => e.competitions[0].competitors.some(c => c.team.abbreviation === TEAM));
+  if (ev) return ev;
+  const t = await getJSON(API + "/teams/" + TEAM.toLowerCase());
+  return (t.team.nextEvent || [])[0] || null;
+}
+
+function fillTeam(el, comp, sit, state, winnerId) {
+  const abbr = comp.team.abbreviation;
+  const img = el.querySelector("img");
+  if (img.dataset.abbr !== abbr) {
+    img.dataset.abbr = abbr;
+    img.onerror = () => { img.onerror = null; img.src = comp.team.logo || ""; };
+    img.src = logoFor(abbr);
+  }
+  el.querySelector(".abbr").textContent = abbr;
+  el.querySelector(".rec").textContent = (comp.records && comp.records[0] && comp.records[0].summary) || comp.record?.[0]?.displayValue || "";
+  const score = comp.score && typeof comp.score === "object" ? comp.score.displayValue : comp.score;
+  el.querySelector(".score").textContent = state === "pre" ? "" : (score ?? "0");
+  el.classList.toggle("has-ball", state === "in" && sit && String(sit.possession) === String(comp.team.id || comp.id));
+  el.classList.toggle("loser", state === "post" && winnerId && String(winnerId) !== String(comp.team.id || comp.id));
+}
+
+function render(ev) {
+  const bug = document.getElementById("bug");
+  const main = document.getElementById("main"), sub = document.getElementById("sub");
+  if (!ev) {
+    bug.hidden = false;
+    for (const id of ["away", "home"]) document.getElementById(id).hidden = true;
+    main.textContent = TEAM; sub.textContent = "No game scheduled";
+    return "idle";
+  }
+  const c = ev.competitions[0];
+  const status = c.status || ev.status;
+  const state = status.type.state;               // pre | in | post
+  const sit = c.situation;
+  const away = c.competitors.find(x => x.homeAway === "away");
+  const home = c.competitors.find(x => x.homeAway === "home");
+  const winner = c.competitors.find(x => x.winner);
+  for (const id of ["away", "home"]) document.getElementById(id).hidden = false;
+  fillTeam(document.getElementById("away"), away, sit, state, winner && (winner.team.id || winner.id));
+  fillTeam(document.getElementById("home"), home, sit, state, winner && (winner.team.id || winner.id));
+
+  sub.className = "sub"; sub.textContent = "";
+  const name = status.type.name;
+  if (state === "pre") {
+    main.textContent = kickoffText(ev.date);
+    sub.textContent = c.broadcasts?.[0]?.names?.join(", ") || "";
+  } else if (state === "in" && name === "STATUS_IN_PROGRESS") {
+    main.innerHTML = "";
+    main.append(ordinal(status.period) + "  ");
+    const clk = document.createElement("span"); clk.className = "clock";
+    clk.textContent = status.displayClock; main.append(clk);
+    if (sit?.downDistanceText) {
+      sub.textContent = sit.downDistanceText;
+      if (sit.isRedZone) sub.classList.add("redzone");
+    }
+  } else {
+    main.textContent = status.type.shortDetail;   // Halftime, End of 3rd, Final, Final/OT, Delayed...
+  }
+  bug.hidden = false;
+  return state;
+}
+
+// ---- demo data -----------------------------------------------------------
+function demoEvent(kind) {
+  if (kind === "bye") return null;
+  const team = (abbr, id, homeAway, score, rec) => ({ id, homeAway, score, team: { id, abbreviation: abbr }, records: [{ summary: rec }] });
+  const states = {
+    pre:   { type: { state: "pre", name: "STATUS_SCHEDULED", shortDetail: "" } },
+    live:  { type: { state: "in", name: "STATUS_IN_PROGRESS" }, period: 3, displayClock: "4:12" },
+    half:  { type: { state: "in", name: "STATUS_HALFTIME", shortDetail: "Halftime" }, period: 2 },
+    final: { type: { state: "post", name: "STATUS_FINAL", shortDetail: "Final" }, period: 4 },
+  };
+  const status = states[kind] || states.live;
+  const comps = [team("ARI", "22", "away", "17", "3-5"), team("DAL", "6", "home", "24", "5-3")];
+  if (kind === "final") comps[1].winner = true;
+  return {
+    date: new Date(Date.now() + 3600e3).toISOString(),
+    status,
+    competitions: [{
+      status, competitors: comps,
+      broadcasts: [{ names: ["FOX"] }],
+      situation: kind === "live" || !kind ? { possession: "6", downDistanceText: "2nd & 7 at ARI 18", isRedZone: true } : undefined,
+    }],
+  };
+}
+
+// ---- loop -----------------------------------------------------------------
+async function tick() {
+  let state = "pre";
+  try {
+    const ev = DEMO ? demoEvent(DEMO) : await findEvent();
+    state = render(ev);
+    lastGood = Date.now();
+  } catch (err) {
+    console.warn("scorebug:", err);
+  }
+  document.getElementById("bug").classList.toggle("stale", !DEMO && lastGood && Date.now() - lastGood > STALE_MS);
+  if (!DEMO) setTimeout(tick, state === "in" ? 10000 : 60000);
+}
+tick();
+</script>
+</body>
+</html>
