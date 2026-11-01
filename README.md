@@ -7,8 +7,8 @@ It's a single web page. **OBS** renders it and sends it out over **NDI**; a ProP
 element shows that NDI feed. That route works on **ProPresenter 7.8.4** (the last perpetual-license version), which
 has no API for putting changing text on screen.
 
-> **Status: early testing.** Tested in a browser and in OBS 33.0.1 on Apple Silicon against live ESPN data.
-> The ProPresenter end and a full live game haven't been checked yet. Please report what works and what doesn't.
+> **Status: early testing.** Tested end to end on Apple Silicon: live ESPN data in OBS 33.0.1, sent over NDI and
+> shown as a prop in ProPresenter 7.8.4. Please report what works and what doesn't.
 
 ---
 

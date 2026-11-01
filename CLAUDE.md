@@ -1,6 +1,6 @@
 # CLAUDE.md — Prop Score Bug
 
-Live NFL score bug for ProPresenter, built 2026-11-01. Owner: Heath (church AV/IT). Church-use license
+Live NFL score bug for ProPresenter, built 2026-11-01; verified end to end in ProPresenter 7.8.4 the same day. Owner: Heath (church AV/IT). Church-use license
 (Millstone Solutions LLC). Public repo: millstonesolutions/prop_score_bug.
 
 ## Why it's shaped like this
